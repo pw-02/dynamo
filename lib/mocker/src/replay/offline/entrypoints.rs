@@ -29,6 +29,7 @@ use crate::replay::{
     ReplayTelemetryOptions, ReplayWorkerArtifacts, SlaThresholds, TraceSimulationReport,
 };
 use crate::scheduler::RouterEventVisibility;
+use aisimulate_core::replay::{WorkerAvailabilityEvent, WorkerRecoveryPolicy};
 
 fn startup_delay_ms(args: &MockerConfig) -> f64 {
     args.startup_time
@@ -207,6 +208,30 @@ fn run_aggregated_with_capture_options(
     scaling_policy: Option<Box<dyn ReplayScalingPolicy>>,
     telemetry: Option<ReplayTelemetryOptions>,
 ) -> Result<TraceSimulationReport> {
+    run_aggregated_with_capture_options_hpc(
+        args, router_config, prefill_load_estimator, input, num_workers,
+        max_in_flight, router_mode, capture_options, max_sim_time_ms, sla,
+        scaling_policy, telemetry, Vec::new(), WorkerRecoveryPolicy::default(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_aggregated_with_capture_options_hpc(
+    args: MockerConfig,
+    router_config: Option<ReplayKvRouterConfig>,
+    prefill_load_estimator: Option<ReplayPrefillLoadEstimator>,
+    input: ReplayRuntimeInput,
+    num_workers: usize,
+    max_in_flight: Option<usize>,
+    router_mode: ReplayRouterMode,
+    capture_options: ReplayCaptureOptions,
+    max_sim_time_ms: Option<f64>,
+    sla: SlaThresholds,
+    scaling_policy: Option<Box<dyn ReplayScalingPolicy>>,
+    telemetry: Option<ReplayTelemetryOptions>,
+    events: Vec<WorkerAvailabilityEvent>,
+    recovery: WorkerRecoveryPolicy,
+) -> Result<TraceSimulationReport> {
     let args = args.normalized()?;
     validate_agentic_host_offload(&input, &[(num_workers, &args)], scaling_policy.is_some())?;
     let (engine, factory) = aggregated_replay_setup(&args)?;
@@ -231,7 +256,8 @@ fn run_aggregated_with_capture_options(
                 RoundRobinReplayComposition::new(scaling_policy),
             )?
             .with_capture_options(capture_options)
-            .with_runtime_input(input);
+            .with_runtime_input(input)
+            .with_worker_availability(events.clone(), recovery)?;
             Ok(with_telemetry(replayer, telemetry)?.run()?)
         }
         ReplayRouterMode::KvRouter => {
@@ -247,7 +273,8 @@ fn run_aggregated_with_capture_options(
                 ),
             )?
             .with_capture_options(capture_options)
-            .with_runtime_input(input);
+            .with_runtime_input(input)
+            .with_worker_availability(events, recovery)?;
             Ok(with_telemetry(replayer, telemetry)?.run()?)
         }
     }
@@ -456,6 +483,37 @@ pub(crate) fn generate_trace_worker_artifacts_with_visibility(
     visibility: Option<RouterEventVisibility>,
 ) -> Result<ReplayWorkerArtifacts> {
     kv_events::generate_trace_worker_artifacts_with_visibility(args, trace, visibility)
+}
+
+/// Aggregated replay with time-indexed HPC capacity events and per-request
+/// full restart. KV-aware placement remains the same Dynamo adapter.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn simulate_trace_with_hpc_events(
+    args: MockerConfig,
+    router_config: Option<ReplayKvRouterConfig>,
+    prefill_load_estimator: Option<ReplayPrefillLoadEstimator>,
+    requests: Vec<DirectRequest>,
+    num_workers: usize,
+    arrival_speedup_ratio: f64,
+    router_mode: ReplayRouterMode,
+    record_per_request: bool,
+    max_sim_time_ms: Option<f64>,
+    sla: SlaThresholds,
+    events: Vec<WorkerAvailabilityEvent>,
+    recovery: WorkerRecoveryPolicy,
+) -> Result<TraceSimulationReport> {
+    let pending = normalize_trace_requests(requests, arrival_speedup_ratio)?;
+    run_aggregated_with_capture_options_hpc(
+        args, router_config, prefill_load_estimator, ReplayRuntimeInput::Requests(pending),
+        num_workers, None, router_mode,
+        ReplayCaptureOptions {
+            capture_per_request: record_per_request,
+            capture_lifecycle_evidence: true,
+            determinism: crate::replay::replay_scope().determinism,
+            ..Default::default()
+        },
+        max_sim_time_ms, sla, None, None, events, recovery,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]

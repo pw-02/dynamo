@@ -934,6 +934,52 @@ pub fn simulate_trace_live_file_with_router_mode_and_format_and_options(
     }
 }
 
+/// Offline Mooncake trace replay with timestamped HPC worker availability.
+/// This accepts both single-turn and multi-turn Mooncake traces.
+#[allow(clippy::too_many_arguments)]
+pub fn simulate_trace_file_with_hpc_events(
+    args: MockerConfig,
+    router_config: Option<KvRouterConfig>,
+    prefill_load_estimator: Option<ReplayPrefillLoadEstimator>,
+    trace_path: &Path,
+    trace_block_size: usize,
+    num_workers: usize,
+    arrival_speedup_ratio: f64,
+    router_mode: ReplayRouterMode,
+    trace_format: TraceFileFormat,
+    record_per_request: bool,
+    max_sim_time_ms: Option<f64>,
+    sla: SlaThresholds,
+    events: Vec<super::WorkerAvailabilityEvent>,
+    recovery: super::WorkerRecoveryPolicy,
+) -> Result<TraceSimulationReport> {
+    let args = args.normalized()?;
+    validate_offline_replay_args(&args)?;
+    if !matches!(trace_format, TraceFileFormat::Mooncake | TraceFileFormat::MooncakeDelta) {
+        bail!("HPC availability currently supports Mooncake and Mooncake-delta trace formats only");
+    }
+    let trace = load_trace_from_file(trace_path, trace_block_size, trace_format, 0.0, 0)?
+        .normalize_session_starts()?
+        .speed_up_timing(arrival_speedup_ratio)?;
+    trace.validate_for_trace_mode()?;
+    if let Some(requests) = single_turn_trace_requests(trace_format, &trace)? {
+        crate::replay::offline::simulate_trace_with_hpc_events(
+            args, router_config, prefill_load_estimator,
+            requests, num_workers, 1.0, router_mode, record_per_request,
+            max_sim_time_ms, sla, events, recovery,
+        )
+    } else {
+        let emit_session_metadata = true;
+        crate::replay::offline::simulate_trace_workload_with_hpc_events(
+            args, router_config, prefill_load_estimator,
+            trace, num_workers, router_mode,
+            trace_accumulates_session_deltas(trace_format),
+            emit_session_metadata, record_per_request, max_sim_time_ms,
+            sla, events, recovery,
+        )
+    }
+}
+
 /// Trace-driven HPC capacity changes on the version-0.13 AISimulate engine.
 /// E3 uses WorkerRecoveryMode::None; E4 uses Restart with a nonzero limit.
 #[allow(clippy::too_many_arguments)]

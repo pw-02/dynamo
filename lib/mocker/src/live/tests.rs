@@ -1000,15 +1000,21 @@ async fn full_output_stream_is_cancelled_without_stalling_an_unrelated_request()
         .unwrap();
     assert_eq!(fast_output.token_id, Some(22));
     assert!(fast_output.completed);
-    assert_eq!(slow.recv().await.unwrap().token_id, Some(7));
-    assert!(slow.recv().await.is_none());
-    assert!(!slow.is_aborted());
+
+    // Do not drain the slow request's single-slot buffer before the second
+    // forward pass tries to deliver its next token. Reading it early can
+    // create capacity and accidentally prevent the overflow under test.
     wait_for_idle(&engine).await;
+    engine.drain_completion_boundary().await.unwrap();
     assert_eq!(
         fpm.0.load(Ordering::Relaxed),
         2,
         "a full route must be cancelled at its completion boundary before a third pass starts"
     );
+    // Channel closure preserves its first buffered token for the client.
+    assert_eq!(slow.recv().await.unwrap().token_id, Some(7));
+    assert!(slow.recv().await.is_none());
+    assert!(!slow.is_aborted());
 }
 
 #[tokio::test]

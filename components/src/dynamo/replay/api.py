@@ -295,6 +295,7 @@ def _materialize_offline_report(
         coverage=native.coverage,
         planner=planner,
         telemetry=telemetry,
+        worker_availability=summary.get("worker_availability"),
     )
 
 

@@ -24,7 +24,8 @@ pub use aisimulate_core::replay::{
     CanonicalReplayCoverage, CanonicalReplayRecord, LifecycleOperation, OfflineRuntimeEvidence,
     PerRequestRecord, ReplayCaptureOptions, ReplayDeterminism, ReplayTerminalStatus, SlaThresholds,
     TraceDistributionStats, TraceGoodputStats, TraceInterTokenLatencyStats, TraceLatencyStats,
-    TraceRequestCounts, TraceThroughputStats,
+    TraceRequestCounts, TraceThroughputStats, WorkerAvailabilityAction,
+    WorkerAvailabilityEvent, WorkerAvailabilityStats, WorkerRecoveryMode, WorkerRecoveryPolicy,
 };
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
@@ -92,6 +93,7 @@ pub struct ReplayRuntimeObservers {
     pub telemetry: Option<ReplayTelemetryOptions>,
 }
 pub use entrypoints::{
+    simulate_trace_requests_with_hpc_events,
     ReplayKvEventVisibility, generate_trace_worker_artifacts_offline,
     generate_trace_worker_artifacts_offline_with_kv_event_visibility,
     simulate_agentic_trace_live_workload_with_router_mode_and_options,

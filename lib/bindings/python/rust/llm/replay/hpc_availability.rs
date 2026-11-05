@@ -135,6 +135,60 @@ pub(super) fn load(
 mod tests {
     use super::*;
     #[test]
+    fn maps_reavailable_external_worker_to_fresh_native_id() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "malleserve-hpc-{}-{unique}.jsonl", std::process::id()
+        ));
+        std::fs::write(&path, concat!(
+            "{\"timestamp_ms\":10,\"event\":\"available\",\"workers\":[1]}\n",
+            "{\"timestamp_ms\":20,\"event\":\"reclaimed\",\"workers\":[1]}\n",
+            "{\"timestamp_ms\":30,\"event\":\"available\",\"workers\":[1]}\n",
+            "{\"timestamp_ms\":40,\"event\":\"reclaimed\",\"workers\":[1]}\n"
+        )).unwrap();
+        let config = HpcConfig {
+            availability_trace: path.display().to_string(),
+            reclamation: "immediate".to_owned(),
+            recovery: "full_request_restart".to_owned(),
+            max_restarts: 2,
+        };
+        let result = load(config, 1);
+        std::fs::remove_file(path).unwrap();
+        let (events, policy) = result.unwrap();
+        assert_eq!(policy.mode, WorkerRecoveryMode::Restart);
+        assert_eq!(events.len(), 4);
+        assert!(matches!(events[0].change, WorkerAvailabilityAction::Add { count: 1 }));
+        assert!(matches!(events[1].change, WorkerAvailabilityAction::Reclaim { ref worker_ids } if worker_ids == &[1]));
+        assert!(matches!(events[2].change, WorkerAvailabilityAction::Add { count: 1 }));
+        assert!(matches!(events[3].change, WorkerAvailabilityAction::Reclaim { ref worker_ids } if worker_ids == &[2]));
+    }
+
+    #[test]
+    fn ignores_reclamation_but_does_not_duplicate_retained_worker() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "malleserve-hpc-retain-{}-{unique}.jsonl", std::process::id()
+        ));
+        std::fs::write(&path, concat!(
+            "{\"timestamp_ms\":10,\"event\":\"available\",\"workers\":[1]}\n",
+            "{\"timestamp_ms\":20,\"event\":\"reclaimed\",\"workers\":[1]}\n",
+            "{\"timestamp_ms\":30,\"event\":\"available\",\"workers\":[1]}\n"
+        )).unwrap();
+        let result = load(HpcConfig {
+            availability_trace: path.display().to_string(),
+            reclamation: "ignored".to_owned(),
+            recovery: "none".to_owned(),
+            max_restarts: 0,
+        }, 1);
+        std::fs::remove_file(path).unwrap();
+        let (events, _) = result.unwrap();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0].change, WorkerAvailabilityAction::Add { count: 1 }));
+    }
+
+    #[test]
     fn rejects_unknown_reclamation() {
         let cfg = HpcConfig {
             availability_trace: "not-needed.jsonl".to_owned(),

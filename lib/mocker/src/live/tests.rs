@@ -973,6 +973,12 @@ async fn full_output_stream_is_cancelled_without_stalling_an_unrelated_request()
         },
     )
     .unwrap();
+    // The mock engine can finish a pass while the next async submit is
+    // waiting to be scheduled. Pin the first completion boundary so the fast
+    // request is queued before the second pass begins. Without this barrier
+    // the third pass can belong to the late fast submission, rather than to
+    // a cancellation failure.
+    let boundary = engine.pause_completion_boundary_before_finish();
     let mut slow = engine
         .submit(DirectRequest {
             tokens: vec![1],
@@ -983,16 +989,34 @@ async fn full_output_stream_is_cancelled_without_stalling_an_unrelated_request()
         })
         .await
         .unwrap();
-    let mut fast = engine
-        .submit(DirectRequest {
-            tokens: vec![2],
-            max_output_tokens: 1,
-            output_token_ids: Some(vec![22]),
-            uuid: Some(Uuid::new_v4()),
-            ..Default::default()
-        })
+    tokio::time::timeout(Duration::from_secs(1), boundary.wait_until_reached())
         .await
-        .unwrap();
+        .expect("first pass completion boundary was not reached");
+    let fast_engine = engine.clone();
+    let fast_submission = tokio::spawn(async move {
+        fast_engine
+            .submit(DirectRequest {
+                tokens: vec![2],
+                max_output_tokens: 1,
+                output_token_ids: Some(vec![22]),
+                uuid: Some(Uuid::new_v4()),
+                ..Default::default()
+            })
+            .await
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while engine.active_request_count() != 2 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("fast request did not register before the pass boundary");
+    // Let the spawned submit hand its command to the actor's control queue.
+    for _ in 0..32 {
+        tokio::task::yield_now().await;
+    }
+    boundary.release();
+    let mut fast = fast_submission.await.unwrap().unwrap();
 
     let fast_output = tokio::time::timeout(std::time::Duration::from_secs(1), fast.recv())
         .await

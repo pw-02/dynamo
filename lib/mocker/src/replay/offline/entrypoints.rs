@@ -579,6 +579,47 @@ pub(crate) fn simulate_concurrency_with_scaling_policy(
     )
 }
 
+/// Trace workload with timestamped HPC add/reclaim events.  Unlike the
+/// request-only path, this also supports multi-turn Mooncake traces.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn simulate_trace_workload_with_hpc_events(
+    args: MockerConfig,
+    router_config: Option<ReplayKvRouterConfig>,
+    prefill_load_estimator: Option<ReplayPrefillLoadEstimator>,
+    trace: Trace,
+    num_workers: usize,
+    router_mode: ReplayRouterMode,
+    accumulate_session_deltas: bool,
+    emit_session_metadata: bool,
+    record_per_request: bool,
+    max_sim_time_ms: Option<f64>,
+    sla: SlaThresholds,
+    events: Vec<WorkerAvailabilityEvent>,
+    recovery: WorkerRecoveryPolicy,
+) -> Result<TraceSimulationReport> {
+    let args = args.normalized()?;
+    let mut driver = trace_workload_driver(
+        trace,
+        args.block_size,
+        router_mode,
+        accumulate_session_deltas,
+    )?;
+    if !emit_session_metadata {
+        driver = driver.without_session_metadata();
+    }
+    run_aggregated_with_capture_options_hpc(
+        args, router_config, prefill_load_estimator,
+        ReplayRuntimeInput::Workload(driver), num_workers, None, router_mode,
+        ReplayCaptureOptions {
+            capture_per_request: record_per_request,
+            capture_lifecycle_evidence: true,
+            determinism: crate::replay::replay_scope().determinism,
+            ..Default::default()
+        },
+        max_sim_time_ms, sla, None, None, events, recovery,
+    )
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn simulate_trace_workload_with_scaling_policy(
     args: MockerConfig,

@@ -579,6 +579,9 @@ class DynamoReplayRunner:
             value = trace_report.get(name)
             if isinstance(value, (dict, list)):
                 metadata[name] = value
+        availability = trace_report.get("worker_availability")
+        if isinstance(availability, dict):
+            metadata["worker_availability"] = availability
         resolved_weka_basis = trace_report.get("weka_nested_timestamp_basis")
         if isinstance(resolved_weka_basis, str):
             metadata["weka_nested_timestamp_basis"] = resolved_weka_basis

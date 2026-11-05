@@ -17,6 +17,7 @@ pub(crate) use entrypoints::{
     simulate_trace_workload_disagg_with_capture_options,
     simulate_trace_workload_disagg_with_scaling_policy,
     simulate_trace_workload_with_capture_options, simulate_trace_workload_with_scaling_policy,
+    simulate_trace_workload_with_hpc_events,
 };
 
 #[cfg(test)]

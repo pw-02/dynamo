@@ -158,10 +158,10 @@ mod tests {
         let (events, policy) = result.unwrap();
         assert_eq!(policy.mode, WorkerRecoveryMode::Restart);
         assert_eq!(events.len(), 4);
-        assert!(matches!(events[0].change, WorkerAvailabilityAction::Add { count: 1 }));
-        assert!(matches!(events[1].change, WorkerAvailabilityAction::Reclaim { ref worker_ids } if worker_ids == &[1]));
-        assert!(matches!(events[2].change, WorkerAvailabilityAction::Add { count: 1 }));
-        assert!(matches!(events[3].change, WorkerAvailabilityAction::Reclaim { ref worker_ids } if worker_ids == &[2]));
+        assert!(matches!(&events[0].change, WorkerAvailabilityAction::Add { count: 1 }));
+        assert!(matches!(&events[1].change, WorkerAvailabilityAction::Reclaim { worker_ids } if worker_ids.as_slice() == [1]));
+        assert!(matches!(&events[2].change, WorkerAvailabilityAction::Add { count: 1 }));
+        assert!(matches!(&events[3].change, WorkerAvailabilityAction::Reclaim { worker_ids } if worker_ids.as_slice() == [2]));
     }
 
     #[test]
@@ -185,7 +185,7 @@ mod tests {
         std::fs::remove_file(path).unwrap();
         let (events, _) = result.unwrap();
         assert_eq!(events.len(), 1);
-        assert!(matches!(events[0].change, WorkerAvailabilityAction::Add { count: 1 }));
+        assert!(matches!(&events[0].change, WorkerAvailabilityAction::Add { count: 1 }));
     }
 
     #[test]

@@ -81,6 +81,7 @@ class _CommonReplayOptions(TypedDict, total=False):
     capture_planner_details: bool
     telemetry_options: TelemetryOptions | None
     kv_event_lag_ms: float | None
+    hpc_config: dict[str, Any] | None
 
 
 class _TraceReplayOptions(_CommonReplayOptions, total=False):
@@ -425,6 +426,7 @@ def run_trace_replay(
     weka_nested_timestamp_basis=None,
     telemetry_options=None,
     kv_event_lag_ms=None,
+    hpc_config=None,
     # Internal: a retune sweep's inner planner is warmed with the history it
     # already bucketed instead of its load_predictor_warmup_trace.
     _planner_warmup_observations=None,
@@ -511,6 +513,7 @@ def run_trace_replay(
         "capture_per_request": capture_per_request,
         "capture_planner_details": capture_planner_details,
         "kv_event_lag_ms": kv_event_lag_ms,
+        "hpc_config": hpc_config,
         "deterministic": _deterministic,
     }
     replay_kwargs.update(_telemetry_kwargs(telemetry_options))
@@ -672,6 +675,7 @@ def run_synthetic_trace_replay(
     capture_planner_details=True,
     telemetry_options=None,
     kv_event_lag_ms=None,
+    hpc_config=None,
 ) -> ReplayReport | dict[str, Any]:
     """Run synthetic replay with the same optional ``TelemetryOptions`` and
     ``kv_event_lag_ms`` contracts as :func:`run_trace_replay`.
@@ -709,6 +713,7 @@ def run_synthetic_trace_replay(
         "capture_per_request": capture_per_request,
         "capture_planner_details": capture_planner_details,
         "kv_event_lag_ms": kv_event_lag_ms,
+        "hpc_config": hpc_config,
     }
     replay_kwargs.update(_telemetry_kwargs(telemetry_options))
     if capture_per_request and replay_mode == "online":

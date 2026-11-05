@@ -1,6 +1,8 @@
 // SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+mod hpc_availability;
+
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
@@ -242,7 +244,7 @@ fn replay_paths_equal(left: &Path, right: &Path) -> bool {
 }
 
 #[pyfunction]
-#[pyo3(signature = (trace_files, extra_engine_args=None, prefill_engine_args=None, decode_engine_args=None, router_config=None, ais_perf_config=None, num_workers=1, num_prefill_workers=1, num_decode_workers=1, replay_concurrency=None, replay_mode="offline", router_mode="round_robin", arrival_speedup_ratio=1.0, trace_block_size=None, trace_format="mooncake", trace_shared_prefix_ratio=0.0, trace_num_prefix_groups=0, report_jsonl_path=None, max_sim_time_ms=None, model_name=None, sla_ttft_ms=None, sla_itl_ms=None, sla_e2e_ms=None, capture_per_request=false, capture_planner_details=true, scaling_policy=None, agentic_lanes=None, execution_model=None, weka_nested_timestamp_basis=None, capture_telemetry=false, telemetry_sample_interval_ms=1_000.0, telemetry_callback=None, telemetry_jsonl_path=None, kv_event_lag_ms=None, agentic_snapshot=None, agentic_warmup=false, agentic_profile=None, deterministic=false, conversation_affinity=None))]
+#[pyo3(signature = (trace_files, extra_engine_args=None, prefill_engine_args=None, decode_engine_args=None, router_config=None, ais_perf_config=None, num_workers=1, num_prefill_workers=1, num_decode_workers=1, replay_concurrency=None, replay_mode="offline", router_mode="round_robin", arrival_speedup_ratio=1.0, trace_block_size=None, trace_format="mooncake", trace_shared_prefix_ratio=0.0, trace_num_prefix_groups=0, report_jsonl_path=None, max_sim_time_ms=None, model_name=None, sla_ttft_ms=None, sla_itl_ms=None, sla_e2e_ms=None, capture_per_request=false, capture_planner_details=true, scaling_policy=None, agentic_lanes=None, execution_model=None, weka_nested_timestamp_basis=None, capture_telemetry=false, telemetry_sample_interval_ms=1_000.0, telemetry_callback=None, telemetry_jsonl_path=None, kv_event_lag_ms=None, agentic_snapshot=None, agentic_warmup=false, agentic_profile=None, deterministic=false, conversation_affinity=None, hpc_config=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn run_mocker_trace_replay(
     py: Python<'_>,
@@ -285,7 +287,19 @@ pub fn run_mocker_trace_replay(
     agentic_profile: Option<&Bound<'_, PyAny>>,
     deterministic: bool,
     conversation_affinity: Option<&Bound<'_, PyAny>>,
+    hpc_config: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyObject> {
+    let hpc_options = hpc_config
+        .map(pythonize::depythonize::<hpc_availability::HpcConfig>)
+        .transpose()?;
+    if hpc_options.is_some()
+        && (replay_mode != "offline" || replay_concurrency.is_some()
+            || scaling_policy.is_some() || agentic_lanes.is_some())
+    {
+        return Err(PyValueError::new_err(
+            "hpc availability requires offline timestamped replay without planner or agentic lanes",
+        ));
+    }
     let conversation_affinity = conversation_affinity
         .map(pythonize::depythonize::<dynamo_mocker::replay::ConversationAffinityConfig>)
         .transpose()?;
@@ -332,6 +346,14 @@ pub fn run_mocker_trace_replay(
         num_prefill_workers,
         num_decode_workers,
     )?;
+    let hpc = hpc_options
+        .map(|config| {
+            if !matches!(&args_selection, ReplayArgsSelection::Aggregated(_)) {
+                anyhow::bail!("hpc availability currently requires aggregated topology");
+            }
+            hpc_availability::load(config, num_workers)
+        })
+        .transpose().map_err(to_pyerr)?;
     let router_mode = parse_replay_router_mode(router_mode)?;
     let trace_format = parse_trace_file_format(trace_format)?;
     let agentic_options = AgenticReplayOptions {
@@ -527,6 +549,9 @@ pub fn run_mocker_trace_replay(
             );
         }
 
+        if hpc.is_some() && !matches!(trace_format, TraceFileFormat::Mooncake | TraceFileFormat::MooncakeDelta) {
+            anyhow::bail!("hpc availability currently supports only Mooncake/Mooncake-delta traces");
+        }
         match select_replay_dispatch(args_selection, &replay_mode, replay_concurrency)? {
             ReplayDispatch::AggregatedOfflineConcurrency(args, max_in_flight) => {
                 dynamo_mocker::replay::simulate_concurrency_file_with_router_mode_and_format_and_runtime_observers(
@@ -545,6 +570,15 @@ pub fn run_mocker_trace_replay(
                     max_sim_time_ms,
                     sla,
                     take_runtime_observers(&mut scaling_policy, &mut telemetry),
+                )
+            }
+            ReplayDispatch::AggregatedOffline(args) if hpc.is_some() => {
+                let (events, recovery) = hpc.clone().expect("checked");
+                dynamo_mocker::replay::simulate_trace_file_with_hpc_events(
+                    *args, router_config.clone(), prefill_load_estimator.clone(),
+                    trace_file, trace_block_size, num_workers, arrival_speedup_ratio,
+                    router_mode, trace_format, record_per_request, max_sim_time_ms,
+                    sla, events, recovery,
                 )
             }
             ReplayDispatch::AggregatedOffline(args) => {

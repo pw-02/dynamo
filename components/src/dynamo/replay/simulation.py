@@ -190,6 +190,8 @@ class DynamoReplayRunner:
             report = self._run_synthetic(spec, common)
 
         metrics, metadata = self._normalize_report(report, output_requirements)
+        if hpc is not None and not isinstance(metadata.get("worker_availability"), dict):
+            raise RuntimeError("HPC replay missing native worker_availability statistics")
         trace_format = spec.workload.get("trace_format")
         agentic_lanes = spec.workload.get("agentic_lanes")
         if (

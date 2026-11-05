@@ -78,6 +78,7 @@ class ReplayReport:
     coverage: dict[str, Any]
     planner: PlannerReplayDetails | None
     telemetry: ReplayTelemetryDetails | None = None
+    worker_availability: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         payload = {
@@ -86,6 +87,8 @@ class ReplayReport:
             "coverage": self.coverage,
             "planner": None if self.planner is None else self.planner.to_dict(),
         }
+        if self.worker_availability is not None:
+            payload["worker_availability"] = self.worker_availability
         # Preserve the exact default-disabled serialized report contract.
         if self.telemetry is not None:
             payload["telemetry"] = self.telemetry.to_dict()

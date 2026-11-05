@@ -1,14 +1,16 @@
 # MalleServe HPC availability experiments on AISimulate 0.13
 
 This branch is an **unvalidated research backport**. The AISimulate
-source branch was initialized from the upstream `release/0.13.0` line
-(`289f8fb`), which is **not proven identical** to the Oct 29 development
-release pinned by Dynamo. Do not merge or report measurements until both
+source branch was initialized from upstream commit `d9620e0` on
+October 28, 2026, immediately before the October 29 nightly window.
+This is closer to Dynamo's pinned development release than the published
+October 21 release branch, but the source SHA is **not yet proven identical**
+to the published October 29 crate. Do not merge or report measurements until both
 the native live regression suite and HPC tests pass.
 
 ## Repositories
 
-- AISimulate backport: `pw-02/aisimulate` branch `malleserve-aisim-013-backport`
+- AISimulate backport: `pw-02/aisimulate` branch `malleserve-aisim-013-nightly-backport`
 - Dynamo integration: `pw-02/dynamo` branch `malleserve-dynosim-013-backport`
 - Original baseline: Dynamo `main`, pinned `aisimulate-core =0.13.0-dev.202610290000000087`
 

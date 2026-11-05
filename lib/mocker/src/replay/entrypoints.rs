@@ -934,6 +934,31 @@ pub fn simulate_trace_live_file_with_router_mode_and_format_and_options(
     }
 }
 
+/// Run aggregated inference against externally scheduled HPC worker additions
+/// and immediate reclamations. Set recovery.mode to Restart for E4; use None
+/// for E3. IDs allocated by Add are monotonically increasing from num_workers.
+#[allow(clippy::too_many_arguments)]
+pub fn simulate_trace_requests_with_hpc_events(
+    args: MockerConfig,
+    router_config: Option<KvRouterConfig>,
+    prefill_load_estimator: Option<ReplayPrefillLoadEstimator>,
+    requests: Vec<DirectRequest>,
+    num_workers: usize,
+    arrival_speedup_ratio: f64,
+    router_mode: ReplayRouterMode,
+    events: Vec<super::WorkerAvailabilityEvent>,
+    recovery: super::WorkerRecoveryPolicy,
+    sla: SlaThresholds,
+) -> Result<TraceSimulationReport> {
+    let args = args.normalized()?;
+    validate_offline_replay_args(&args)?;
+    crate::replay::offline::simulate_trace_with_hpc_events(
+        args, router_config, prefill_load_estimator, requests,
+        num_workers, arrival_speedup_ratio, router_mode, true, None,
+        sla, events, recovery,
+    )
+}
+
 pub fn simulate_trace_requests(
     args: MockerConfig,
     requests: Vec<DirectRequest>,

@@ -958,7 +958,7 @@ fn write_per_request_jsonl(
 }
 
 #[pyfunction]
-#[pyo3(signature = (input_tokens, output_tokens, request_count, extra_engine_args=None, prefill_engine_args=None, decode_engine_args=None, router_config=None, ais_perf_config=None, num_workers=1, num_prefill_workers=1, num_decode_workers=1, replay_concurrency=None, replay_mode="offline", router_mode="round_robin", arrival_speedup_ratio=1.0, request_rate=None, arrival_interval_ms=None, arrival_seed=42, turns_per_session=1, shared_prefix_ratio=0.0, num_prefix_groups=0, inter_turn_delay_ms=0.0, model_name=None, sla_ttft_ms=None, sla_itl_ms=None, sla_e2e_ms=None, capture_per_request=false, capture_planner_details=true, scaling_policy=None, capture_telemetry=false, telemetry_sample_interval_ms=1_000.0, telemetry_callback=None, telemetry_jsonl_path=None, kv_event_lag_ms=None))]
+#[pyo3(signature = (input_tokens, output_tokens, request_count, extra_engine_args=None, prefill_engine_args=None, decode_engine_args=None, router_config=None, ais_perf_config=None, num_workers=1, num_prefill_workers=1, num_decode_workers=1, replay_concurrency=None, replay_mode="offline", router_mode="round_robin", arrival_speedup_ratio=1.0, request_rate=None, arrival_interval_ms=None, arrival_seed=42, turns_per_session=1, shared_prefix_ratio=0.0, num_prefix_groups=0, inter_turn_delay_ms=0.0, model_name=None, sla_ttft_ms=None, sla_itl_ms=None, sla_e2e_ms=None, capture_per_request=false, capture_planner_details=true, scaling_policy=None, capture_telemetry=false, telemetry_sample_interval_ms=1_000.0, telemetry_callback=None, telemetry_jsonl_path=None, kv_event_lag_ms=None, hpc_config=None))]
 #[allow(clippy::too_many_arguments)]
 pub fn run_mocker_synthetic_trace_replay(
     py: Python<'_>,
@@ -996,7 +996,16 @@ pub fn run_mocker_synthetic_trace_replay(
     telemetry_callback: Option<Py<PyAny>>,
     telemetry_jsonl_path: Option<PathBuf>,
     kv_event_lag_ms: Option<f64>,
+    hpc_config: Option<&Bound<'_, PyAny>>,
 ) -> PyResult<PyObject> {
+    let hpc_options = hpc_config
+        .map(pythonize::depythonize::<hpc_availability::HpcConfig>)
+        .transpose()?;
+    if hpc_options.is_some() && (replay_mode != "offline" || replay_concurrency.is_some() || scaling_policy.is_some()) {
+        return Err(PyValueError::new_err(
+            "hpc availability requires timestamped offline synthetic requests without planner",
+        ));
+    }
     let kv_event_lag_ms = validate_kv_event_lag_ms(kv_event_lag_ms, replay_mode, router_mode)?;
     if capture_per_request && replay_mode != "offline" {
         return Err(PyValueError::new_err(
@@ -1025,6 +1034,14 @@ pub fn run_mocker_synthetic_trace_replay(
         num_prefill_workers,
         num_decode_workers,
     )?;
+    let hpc = hpc_options
+        .map(|config| {
+            if !matches!(&args_selection, ReplayArgsSelection::Aggregated(_)) {
+                anyhow::bail!("hpc availability requires aggregated topology");
+            }
+            hpc_availability::load(config, num_workers)
+        })
+        .transpose().map_err(to_pyerr)?;
     let router_mode = parse_replay_router_mode(router_mode)?;
     let prefill_load_estimator = load_replay_prefill_load_estimator(
         py,
@@ -1076,6 +1093,9 @@ pub fn run_mocker_synthetic_trace_replay(
             || num_prefix_groups > 0
             || inter_turn_delay_ms > 0.0;
 
+        if hpc.is_some() && use_workload {
+            anyhow::bail!("hpc availability does not yet support multi-turn synthetic sessions");
+        }
         if use_workload {
             let mut trace = build_synthetic_workload(
                 block_size,
@@ -1219,6 +1239,21 @@ pub fn run_mocker_synthetic_trace_replay(
                         record_per_request,
                         sla,
                         take_runtime_observers(&mut scaling_policy, &mut telemetry),
+                    )
+                }
+                ("offline", None) if hpc.is_some() => {
+                    let (events, recovery) = hpc.clone().expect("checked");
+                    dynamo_mocker::replay::simulate_trace_requests_with_hpc_events(
+                        *args,
+                        router_config.clone(),
+                        prefill_load_estimator.clone(),
+                        requests,
+                        num_workers,
+                        arrival_speedup_ratio,
+                        router_mode,
+                        events,
+                        recovery,
+                        sla,
                     )
                 }
                 ("offline", None) => dynamo_mocker::replay::simulate_trace_requests_with_router_mode_and_runtime_observers(

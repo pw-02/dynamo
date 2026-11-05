@@ -136,6 +136,14 @@ class DynamoReplayRunner:
         """Execute one trace or synthetic replay with requested Dynamo hooks."""
 
         output_requirements = output_requirements or ReplayOutputRequirements()
+        hpc = spec.workload.get("hpc")
+        if hpc is not None:
+            if not isinstance(hpc, dict):
+                raise TypeError("hpc settings must be a mapping")
+            if spec.backend_deployment.deployment_mode != "agg":
+                raise ValueError("HPC availability is supported only for aggregated workers")
+            if spec.workload.get("replay_concurrency") is not None or spec.concurrency is not None:
+                raise ValueError("HPC availability requires a timestamped, not concurrency, workload")
         self.capabilities.require_compatible(spec)
         execution_model = self._execution_target_model(spec)
         (
@@ -167,6 +175,7 @@ class DynamoReplayRunner:
                 if output_requirements.capture_telemetry
                 else None
             ),
+            **({"hpc_config": hpc} if hpc is not None else {}),
             **self._goodput_sla_kwargs(spec),
         }
 

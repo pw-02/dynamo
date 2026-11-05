@@ -94,6 +94,7 @@ pub struct ReplayRuntimeObservers {
 }
 pub use entrypoints::{
     simulate_trace_requests_with_hpc_events,
+    simulate_trace_file_with_hpc_events,
     ReplayKvEventVisibility, generate_trace_worker_artifacts_offline,
     generate_trace_worker_artifacts_offline_with_kv_event_visibility,
     simulate_agentic_trace_live_workload_with_router_mode_and_options,

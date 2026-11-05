@@ -356,6 +356,11 @@ pub fn run_mocker_trace_replay(
         .transpose().map_err(to_pyerr)?;
     let router_mode = parse_replay_router_mode(router_mode)?;
     let trace_format = parse_trace_file_format(trace_format)?;
+    if hpc.is_some() && !matches!(trace_format, TraceFileFormat::Mooncake | TraceFileFormat::MooncakeDelta) {
+        return Err(PyValueError::new_err(
+            "hpc availability currently supports only Mooncake/Mooncake-delta trace formats",
+        ));
+    }
     let agentic_options = AgenticReplayOptions {
         snapshot: agentic_snapshot.map(pythonize::depythonize).transpose()?,
         warmup: agentic_warmup,

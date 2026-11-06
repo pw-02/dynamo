@@ -20,6 +20,9 @@ pub(super) struct HpcConfig {
     pub scenario: String,
     #[serde(default)]
     pub extra_workers: usize,
+    /// Explicit startup override for controlled capacity studies.
+    #[serde(default)]
+    pub instant_startup: Option<bool>,
     #[serde(default)]
     pub availability_trace: Option<String>,
     pub reclamation: String,
@@ -31,7 +34,9 @@ fn default_scenario() -> String { "realistic_transient".to_owned() }
 
 impl HpcConfig {
     pub(super) fn instant_startup(&self) -> bool {
-        matches!(self.scenario.as_str(), "ideal_elasticity" | "perfect_transient")
+        self.instant_startup.unwrap_or_else(|| {
+            matches!(self.scenario.as_str(), "ideal_elasticity" | "perfect_transient")
+        })
     }
 }
 
@@ -183,6 +188,7 @@ mod tests {
         let config = HpcConfig {
             scenario: "realistic_transient".to_owned(),
             extra_workers: 0,
+            instant_startup: None,
             availability_trace: Some(path.display().to_string()),
             reclamation: "immediate".to_owned(),
             recovery: "full_request_restart".to_owned(),
@@ -214,6 +220,7 @@ mod tests {
         let result = load(HpcConfig {
             scenario: "realistic_transient".to_owned(),
             extra_workers: 0,
+            instant_startup: None,
             availability_trace: Some(path.display().to_string()),
             reclamation: "ignored".to_owned(),
             recovery: "none".to_owned(),
@@ -230,6 +237,7 @@ mod tests {
         let cfg = HpcConfig {
             scenario: "realistic_transient".to_owned(),
             extra_workers: 0,
+            instant_startup: None,
             availability_trace: Some("not-needed.jsonl".to_owned()),
             reclamation: "invalid".to_owned(),
             recovery: "none".to_owned(),
@@ -243,6 +251,7 @@ mod tests {
         let (events, policy) = load(HpcConfig {
             scenario: "persistent_only".into(),
             extra_workers: 0,
+            instant_startup: None,
             availability_trace: None,
             reclamation: "immediate".into(),
             recovery: "none".into(),
@@ -257,6 +266,7 @@ mod tests {
         let (events, _) = load(HpcConfig {
             scenario: "ideal_elasticity".into(),
             extra_workers: 4,
+            instant_startup: None,
             availability_trace: None,
             reclamation: "immediate".into(),
             recovery: "none".into(),
@@ -282,6 +292,7 @@ mod tests {
         let result = load(HpcConfig {
             scenario: "perfect_transient".into(),
             extra_workers: 0,
+            instant_startup: None,
             availability_trace: Some(path.display().to_string()),
             reclamation: "immediate".into(),
             recovery: "none".into(),

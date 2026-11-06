@@ -276,8 +276,8 @@ mod tests {
             "hpc-perfect-{}-{unique}.jsonl", std::process::id()
         ));
         std::fs::write(&path, concat!(
-            "{\"timestamp_ms\":0,\"event\":\"available\",\"workers\":[4]}\\n",
-            "{\"timestamp_ms\":100,\"event\":\"reclaimed\",\"workers\":[4]}\\n",
+            "{\"timestamp_ms\":0,\"event\":\"available\",\"workers\":[4]}\n",
+            "{\"timestamp_ms\":100,\"event\":\"reclaimed\",\"workers\":[4]}\n",
         )).unwrap();
         let result = load(HpcConfig {
             scenario: "perfect_transient".into(),

@@ -16,10 +16,23 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct HpcConfig {
-    pub availability_trace: String,
+    #[serde(default = "default_scenario")]
+    pub scenario: String,
+    #[serde(default)]
+    pub extra_workers: usize,
+    #[serde(default)]
+    pub availability_trace: Option<String>,
     pub reclamation: String,
     pub recovery: String,
     pub max_restarts: usize,
+}
+
+fn default_scenario() -> String { "realistic_transient".to_owned() }
+
+impl HpcConfig {
+    pub(super) fn instant_startup(&self) -> bool {
+        matches!(self.scenario.as_str(), "ideal_elasticity" | "perfect_transient")
+    }
 }
 
 #[derive(Deserialize)]
@@ -34,6 +47,18 @@ pub(super) fn load(
     config: HpcConfig,
     initial_workers: usize,
 ) -> Result<(Vec<WorkerAvailabilityEvent>, WorkerRecoveryPolicy)> {
+    match config.scenario.as_str() {
+        "persistent_only" => return Ok((Vec::new(), WorkerRecoveryPolicy { mode: WorkerRecoveryMode::None, max_restarts: 0 })),
+        "ideal_elasticity" => {
+            ensure!(config.extra_workers > 0, "ideal_elasticity requires extra_workers > 0");
+            return Ok((vec![WorkerAvailabilityEvent {
+                time_ms: 0.0,
+                change: WorkerAvailabilityAction::Add { count: config.extra_workers },
+            }], WorkerRecoveryPolicy { mode: WorkerRecoveryMode::None, max_restarts: 0 }));
+        }
+        "perfect_transient" | "realistic_transient" => {},
+        other => bail!("unsupported HPC scenario {other}"),
+    }
     let recovery = match config.recovery.as_str() {
         "none" => WorkerRecoveryMode::None,
         "full_request_restart" => WorkerRecoveryMode::Restart,
@@ -52,7 +77,11 @@ pub(super) fn load(
         recovery != WorkerRecoveryMode::Restart || config.max_restarts > 0,
         "full-request restart requires positive max_restarts"
     );
-    let path = Path::new(&config.availability_trace);
+    ensure!(config.scenario != "perfect_transient" || recovery == WorkerRecoveryMode::None,
+        "perfect_transient does not use restart recovery");
+    let trace = config.availability_trace.as_deref()
+        .context("availability_trace is required for transient scenarios")?;
+    let path = Path::new(trace);
     let contents = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read HPC availability trace {}", path.display()))?;
     let mut previous_ms = 0.0_f64;
@@ -118,7 +147,11 @@ pub(super) fn load(
                 if !reclaimed.is_empty() {
                     events.push(WorkerAvailabilityEvent {
                         time_ms: row.timestamp_ms,
-                        change: WorkerAvailabilityAction::Reclaim { worker_ids: reclaimed },
+                        change: if config.scenario == "perfect_transient" {
+                            WorkerAvailabilityAction::ReclaimGracefully { worker_ids: reclaimed }
+                        } else {
+                            WorkerAvailabilityAction::Reclaim { worker_ids: reclaimed }
+                        },
                     });
                 }
             }
@@ -148,7 +181,9 @@ mod tests {
             "{\"timestamp_ms\":40,\"event\":\"reclaimed\",\"workers\":[1]}\n"
         )).unwrap();
         let config = HpcConfig {
-            availability_trace: path.display().to_string(),
+            scenario: "realistic_transient".to_owned(),
+            extra_workers: 0,
+            availability_trace: Some(path.display().to_string()),
             reclamation: "immediate".to_owned(),
             recovery: "full_request_restart".to_owned(),
             max_restarts: 2,
@@ -177,7 +212,9 @@ mod tests {
             "{\"timestamp_ms\":30,\"event\":\"available\",\"workers\":[1]}\n"
         )).unwrap();
         let result = load(HpcConfig {
-            availability_trace: path.display().to_string(),
+            scenario: "realistic_transient".to_owned(),
+            extra_workers: 0,
+            availability_trace: Some(path.display().to_string()),
             reclamation: "ignored".to_owned(),
             recovery: "none".to_owned(),
             max_restarts: 0,
@@ -191,7 +228,9 @@ mod tests {
     #[test]
     fn rejects_unknown_reclamation() {
         let cfg = HpcConfig {
-            availability_trace: "not-needed.jsonl".to_owned(),
+            scenario: "realistic_transient".to_owned(),
+            extra_workers: 0,
+            availability_trace: Some("not-needed.jsonl".to_owned()),
             reclamation: "invalid".to_owned(),
             recovery: "none".to_owned(),
             max_restarts: 0,

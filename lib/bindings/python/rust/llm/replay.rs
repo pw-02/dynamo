@@ -292,6 +292,8 @@ pub fn run_mocker_trace_replay(
     let hpc_options = hpc_config
         .map(pythonize::depythonize::<hpc_availability::HpcConfig>)
         .transpose()?;
+    let hpc_instant_startup = hpc_options.as_ref()
+        .is_some_and(hpc_availability::HpcConfig::instant_startup);
     if hpc_options.is_some()
         && (replay_mode != "offline" || replay_concurrency.is_some()
             || scaling_policy.is_some() || agentic_lanes.is_some())
@@ -579,8 +581,10 @@ pub fn run_mocker_trace_replay(
             }
             ReplayDispatch::AggregatedOffline(args) if hpc.is_some() => {
                 let (events, recovery) = hpc.clone().expect("checked");
+                let mut hpc_args = *args;
+                if hpc_instant_startup { hpc_args.startup_time = None; }
                 dynamo_mocker::replay::simulate_trace_file_with_hpc_events(
-                    *args, router_config.clone(), prefill_load_estimator.clone(),
+                    hpc_args, router_config.clone(), prefill_load_estimator.clone(),
                     trace_file, trace_block_size, num_workers, arrival_speedup_ratio,
                     router_mode, trace_format, record_per_request, max_sim_time_ms,
                     sla, events, recovery,
@@ -1006,6 +1010,8 @@ pub fn run_mocker_synthetic_trace_replay(
     let hpc_options = hpc_config
         .map(pythonize::depythonize::<hpc_availability::HpcConfig>)
         .transpose()?;
+    let hpc_instant_startup = hpc_options.as_ref()
+        .is_some_and(hpc_availability::HpcConfig::instant_startup);
     if hpc_options.is_some() && (replay_mode != "offline" || replay_concurrency.is_some() || scaling_policy.is_some()) {
         return Err(PyValueError::new_err(
             "hpc availability requires timestamped offline synthetic requests without planner",
@@ -1248,8 +1254,10 @@ pub fn run_mocker_synthetic_trace_replay(
                 }
                 ("offline", None) if hpc.is_some() => {
                     let (events, recovery) = hpc.clone().expect("checked");
+                    let mut hpc_args = *args;
+                    if hpc_instant_startup { hpc_args.startup_time = None; }
                     dynamo_mocker::replay::simulate_trace_requests_with_hpc_events(
-                        *args,
+                        hpc_args,
                         router_config.clone(),
                         prefill_load_estimator.clone(),
                         requests,

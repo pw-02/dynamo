@@ -43,7 +43,10 @@ impl HpcConfig {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct AvailabilityRow {
-    timestamp_ms: f64,
+    #[serde(default)]
+    timestamp_ms: Option<f64>,
+    #[serde(default)]
+    timestamp_s: Option<f64>,
     event: String,
     workers: Vec<usize>,
 }
@@ -102,12 +105,19 @@ pub(super) fn load(
         let row: AvailabilityRow = serde_json::from_str(line).with_context(|| {
             format!("{}:{number}: invalid availability JSONL", path.display())
         })?;
+        ensure!(row.timestamp_ms.is_some() != row.timestamp_s.is_some(),
+            "{}:{number}: provide exactly one of timestamp_s or timestamp_ms", path.display());
+        let time_ms = if let Some(seconds) = row.timestamp_s {
+            seconds * 1_000.0
+        } else {
+            row.timestamp_ms.expect("checked timestamp_ms or timestamp_s")
+        };
         ensure!(
-            row.timestamp_ms.is_finite() && row.timestamp_ms >= previous_ms,
+            time_ms.is_finite() && time_ms >= previous_ms,
             "{}:{number}: timestamps must be finite, nonnegative and nondecreasing",
             path.display()
         );
-        previous_ms = row.timestamp_ms;
+        previous_ms = time_ms;
         ensure!(
             !row.workers.is_empty() && row.workers.iter().copied().collect::<BTreeSet<_>>().len() == row.workers.len(),
             "{}:{number}: workers must be a nonempty list of unique IDs",
@@ -133,7 +143,7 @@ pub(super) fn load(
                 }
                 if added > 0 {
                     events.push(WorkerAvailabilityEvent {
-                        time_ms: row.timestamp_ms,
+                        time_ms,
                         change: WorkerAvailabilityAction::Add { count: added },
                     });
                 }
@@ -151,7 +161,7 @@ pub(super) fn load(
                 }
                 if !reclaimed.is_empty() {
                     events.push(WorkerAvailabilityEvent {
-                        time_ms: row.timestamp_ms,
+                        time_ms,
                         change: if config.scenario == "perfect_transient" {
                             WorkerAvailabilityAction::ReclaimGracefully { worker_ids: reclaimed }
                         } else {
@@ -172,6 +182,43 @@ pub(super) fn load(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn accepts_seconds_and_legacy_milliseconds_without_changing_simulation_time() {
+        for (field, stamp) in [("timestamp_s", 2.075), ("timestamp_ms", 2075.0)] {
+            let unique = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+            let path = std::env::temp_dir().join(format!(
+                "hpc-seconds-{}-{unique}.jsonl", std::process::id()
+            ));
+            std::fs::write(&path, format!(
+                "{{\"{field}\":0,\"event\":\"available\",\"workers\":[4]}}\n\
+                 {{\"{field}\":{stamp},\"event\":\"reclaimed\",\"workers\":[4]}}\n"
+            )).unwrap();
+            let result = load(HpcConfig {
+                scenario: "realistic_transient".into(),
+                extra_workers: 0,
+                instant_startup: None,
+                availability_trace: Some(path.display().to_string()),
+                reclamation: "immediate".into(),
+                recovery: "none".into(),
+                max_restarts: 0,
+            }, 4);
+            std::fs::remove_file(&path).unwrap();
+            let (events, _) = result.unwrap();
+            assert_eq!(events.len(), 2);
+            assert_eq!(events[0].time_ms, 0.0);
+            assert!((events[1].time_ms - 2075.0).abs() < 1e-10);
+        }
+    }
+
+    #[test]
+    fn rejects_trace_rows_with_ambiguous_time_units() {
+        let row = serde_json::from_str::<AvailabilityRow>(
+            r#"{"timestamp_s":2,"timestamp_ms":2000,"event":"available","workers":[4]}"#
+        ).unwrap();
+        assert!(row.timestamp_s.is_some() && row.timestamp_ms.is_some());
+    }
+
     #[test]
     fn maps_reavailable_external_worker_to_fresh_native_id() {
         let unique = std::time::SystemTime::now()

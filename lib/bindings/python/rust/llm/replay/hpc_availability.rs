@@ -237,4 +237,61 @@ mod tests {
         };
         assert!(load(cfg, 1).is_err());
     }
+
+    #[test]
+    fn baseline_has_no_availability_events() {
+        let (events, policy) = load(HpcConfig {
+            scenario: "persistent_only".into(),
+            extra_workers: 0,
+            availability_trace: None,
+            reclamation: "immediate".into(),
+            recovery: "none".into(),
+            max_restarts: 0,
+        }, 4).unwrap();
+        assert!(events.is_empty());
+        assert_eq!(policy.mode, WorkerRecoveryMode::None);
+    }
+
+    #[test]
+    fn ideal_elasticity_adds_four_workers_at_time_zero() {
+        let (events, _) = load(HpcConfig {
+            scenario: "ideal_elasticity".into(),
+            extra_workers: 4,
+            availability_trace: None,
+            reclamation: "immediate".into(),
+            recovery: "none".into(),
+            max_restarts: 0,
+        }, 4).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].time_ms, 0.0);
+        assert!(matches!(events[0].change,
+            WorkerAvailabilityAction::Add { count: 4 }));
+    }
+
+    #[test]
+    fn perfect_transient_reclaims_gracefully() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "hpc-perfect-{}-{unique}.jsonl", std::process::id()
+        ));
+        std::fs::write(&path, concat!(
+            "{\"timestamp_ms\":0,\"event\":\"available\",\"workers\":[4]}\\n",
+            "{\"timestamp_ms\":100,\"event\":\"reclaimed\",\"workers\":[4]}\\n",
+        )).unwrap();
+        let result = load(HpcConfig {
+            scenario: "perfect_transient".into(),
+            extra_workers: 0,
+            availability_trace: Some(path.display().to_string()),
+            reclamation: "immediate".into(),
+            recovery: "none".into(),
+            max_restarts: 0,
+        }, 4);
+        std::fs::remove_file(&path).unwrap();
+        let (events, _) = result.unwrap();
+        assert!(matches!(&events[1].change,
+            WorkerAvailabilityAction::ReclaimGracefully { worker_ids }
+            if worker_ids.as_slice() == [4]));
+    }
+
 }

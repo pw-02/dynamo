@@ -18,7 +18,77 @@ This branch intentionally keeps the Cargo **package name**
 `aisimulate-core`. It does **not** use the incompatible 0.14 package rename
 (`aisim-core`), and it does not change Dynamo's production live scheduler.
 
-## E1–E4 experiment matrix
+## Four named capacity scenarios (research interface)
+
+Run the **same timestamped request workload**, same four persistent aggregated workers,
+same router, and same availability trace for the comparable experiments. Set
+`hpc.scenario` in the AISimulate prediction YAML:
+
+| Scenario | YAML scenario | Additional capacity | Reclamation | Recovery |
+| --- | --- | --- | --- | --- |
+| Persistent-only | `persistent_only` | None | None | None |
+| Ideal elasticity | `ideal_elasticity` | `extra_workers: 4` at t=0, instantly ready | None | None |
+| Perfect transient usage | `perfect_transient` | Trace-driven, instantly ready | Optimistic graceful draining | No lost in-flight work |
+| Realistic transient usage | `realistic_transient` | Trace-driven, configured startup | Immediate forced removal | None or full-request restart |
+
+Example, added under an otherwise valid `--stack dynamo` aggregated prediction:
+
+```yaml
+# Persistent-only (4 baseline workers from engine.workers.aggregated.replicas)
+hpc:
+  scenario: persistent_only
+```
+
+```yaml
+# Ideal elasticity: baseline 4 + 4 extra, available from simulation time zero
+hpc:
+  scenario: ideal_elasticity
+  extra_workers: 4
+```
+
+```yaml
+# Perfect transient: same trace as realistic, instantaneous startup,
+# no interruption of active requests (optimistic drain).
+hpc:
+  scenario: perfect_transient
+  availability_trace: experiments/dynosim/traces/hpc_availability_smoke.jsonl
+```
+
+```yaml
+# Realistic transient: actual worker startup, preemption and retry
+hpc:
+  scenario: realistic_transient
+  availability_trace: experiments/dynosim/traces/hpc_availability_smoke.jsonl
+  reclamation: immediate
+  recovery: full_request_restart
+  max_restarts: 2
+```
+
+**Upper-bound caveat:** The `perfect_transient` scenario stops new placement
+at the reclaim timestamp but lets already-running requests finish on the
+reclaimed worker before releasing its GPU. Therefore some GPU-seconds may
+extend **past** the supplied availability window. It is an *optimistic,
+grace-period capacity bound*, **not** a physically strict
+zero-cost live-migration oracle. Do not interpret it as demonstrated
+deployability without reclaim grace. Report the distinction explicitly.
+
+The `ideal_elasticity` scenario is a separate always-on 8-worker capacity
+reference. Its additional workers do **not** obey the trace. The baseline
+four workers are still selected by the engine's configured aggregated replicas.
+
+The scenarios use the same existing native aggregated replay path; they
+do not enable disaggregated prefill/decode, actual GPU provisioning,
+production Dynamo Migrator, or the Planner.
+
+For apples-to-apples evaluation, report completed request throughput,
+SLO goodput, p95 latency, failed requests, restarts, and GPU worker-seconds.
+Keep arrival seeds, workload requests, initial GPU counts, router policy,
+model/backend, and trace identical across the last two scenarios.
+The existing worker-availability statistics report reclaim events at
+the nominal deadline; for the optimistic scenario, treat these as
+**drain start**, not proof of physical worker removal.
+
+## Historical E1–E4 experiment matrix
 
 | ID | Initial workers | Availability events | Recovery |
 | --- | --- | --- | --- |
